@@ -1,0 +1,28 @@
+# The live workbook is never committed - maintained on SharePoint/Teams,
+# not a copy per repo. See README.md "Repository structure" for why.
+bus_data*.xlsx
+
+# Any local test copy, however named, should not slip in either.
+test_*.xlsx
+*_test.xlsx
+stress.xlsx
+
+# Generated output - real regulation titles/numbers, regenerated on
+# demand from the workbook above. Same reasoning as the workbook itself.
+*SummaryRegChanges_*.html
+*SummaryRegChanges_*.pdf
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# OneDrive placeholder/conflict artifacts (this folder lives under
+# OneDrive - Siemens AG, so these show up if a sync conflict happens)
+*.tmp
+* - Copy.*
+* (1).*
