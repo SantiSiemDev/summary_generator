@@ -25,24 +25,29 @@ Or import and call directly:
     build(data, out_dir="/mnt/data")
 
 INPUT: the "Summary" sheet of bus_data.xlsx if present (one row per
-regulation, English + German side by side); falls back to reading
-"Circulars" directly if there is no Summary sheet yet (English only,
-no archivings - see load_from_xlsx). Only the CURRENT bus quarter is
-rendered - "Circulars" may list several quarters at once, but this
-document is scoped to what is being published this cycle. "Current" is
+regulation, English + German side by side); falls back to reading the
+roadmap sheet directly if there is no Summary sheet yet (English only,
+no archivings - see load_from_xlsx; accepts either "Roadmap" or
+"Circulars" as that sheet's name - see CIRCULARS_SHEETS). Only the
+CURRENT bus quarter is rendered - the roadmap sheet may list several
+quarters at once, but this document is scoped to what is being
+published this cycle. "Current" is
 auto-detected (the earliest quarter still present in the data that is
 not already behind today's date) unless a quarter is passed explicitly
 - see load_from_xlsx's `quarter` argument.
 
-LAYOUT: A4 portrait. Page 1 is a dark overview page with up to seven
-cards (New/Upgrade/Update/Archivings for Circulars; New/Upgrade/
-Archivings for Standards), each listing the regulations in that
-bucket. The remaining pages are light detail tables, one section per
-(type, bucket) combination that actually has rows: New or revised
-Circulars, New or revised Standards, Archived Circulars, Archived
-Standards - each starting on its own page and spanning as many pages
-as its row count needs. All of this is decided in Python before any
-HTML is written (see "Pagination" below) - there is no script tag in
+LAYOUT: A4 portrait, every page on the same dark navy background. Page 1
+is an overview with up to seven cards (New/Upgrade/Update/Archivings
+for Circulars; New/Upgrade/Archivings for Standards), each colored by
+its Change state and listing the regulations in that bucket. The
+remaining pages are detail tables (light rows on the same dark page),
+one section per (type, bucket) combination that actually has rows: New
+or revised Circulars, New or revised Standards, Archived Circulars,
+Archived Standards - each starting on its own page and spanning as
+many pages as its row count needs, bordered in teal for Circulars or
+blue for Standards, with a colored left-edge stripe per row marking
+its Change state. All of this is decided in Python before any HTML is
+written (see "Pagination" below) - there is no script tag in
 the output deciding it live.
 
 OUTPUT: writes "SummaryRegChanges_<year>_Q<n>.html" to out_dir (year
@@ -61,12 +66,12 @@ from datetime import date
 
 # ---------------------------------------------------------------------
 # The real Siemens wordmark, inlined as SVG with fill="currentColor" so it
-# automatically follows each page's own text color (white on the dark cover
-# page, navy on light detail pages) - no CSS filter/recolor hack needed. An
-# earlier version referenced it as an <img src="data:...svg;base64,...">
-# with the fill hardcoded to white, which needed a CSS filter to recolor it
-# for light pages; that was tried and produced a visibly wrong purple-ish
-# tint (confirmed via an actual rendered page, not just reading the filter
+# automatically follows the page's own text color - no CSS filter/recolor
+# hack needed. An earlier version referenced it as an
+# <img src="data:...svg;base64,...")> with the fill hardcoded to white,
+# which needed a CSS filter to recolor it for a light-page variant of this
+# document; that was tried and produced a visibly wrong purple-ish tint
+# (confirmed via an actual rendered page, not just reading the filter
 # values) - inlining as real SVG with currentColor sidesteps the problem
 # entirely rather than fighting the filter further.
 # ---------------------------------------------------------------------
@@ -104,10 +109,37 @@ WORDMARK = (
 )
 
 NAVY = "#000028"
-TEAL = "#009999"
 GREY = "#DFDFD9"
 LINK = "#00557C"
 WHITE = "#FFFFFF"
+
+# Two "family" colors distinguishing Circulars from Standards - applied
+# consistently everywhere the family matters: the cover page's vertical
+# band label, the underlined word in each detail page's subtitle, and
+# the detail table's header row / outer border. Both are existing
+# Siemens brand colors, chosen for a clear enough hue difference that
+# they don't read as "the same blue" side by side on the cover page.
+CIRC = "#009999"   # Circulars - the original brand teal
+STD = "#0087BE"    # Standards - a distinctly bluer brand accent
+TEAL = CIRC        # kept as an alias: used for links, the h1 title, etc.
+                    # (page-level branding, not the family-color system)
+
+# Four "state" colors for Change = New / Upgrade / Update / Archiving -
+# applied to each cover-page card header and, on the detail tables, as a
+# left-edge stripe on every row block, so the same color means the same
+# thing whether you're looking at the overview or the detail. All four
+# were darkened from their brighter starting points specifically so
+# white text/icons sit on them at a real, checked contrast ratio (WCAG,
+# computed - not eyeballed): each is >=4:1 against white. Upgrade is
+# violet rather than a third blue on purpose, so it can never be
+# mistaken for the Standards family color STD when a Standards card
+# happens to be an Upgrade.
+NEW = "#008B68"
+UPGRADE = "#6A5AA8"
+UPDATE = "#9D6D00"
+ARCHIVED = "#6B7280"
+STATE_COLOR = {"New": NEW, "Upgrade": UPGRADE, "Update": UPDATE, "Archiving": ARCHIVED}
+FAMILY_COLOR = {"Circular": CIRC, "Standard": STD}
 
 ARROW = "\u2192"
 DE_MONTHS = ["Januar", "Februar", "M\u00e4rz", "April", "Mai", "Juni",
@@ -115,22 +147,21 @@ DE_MONTHS = ["Januar", "Februar", "M\u00e4rz", "April", "Mai", "Juni",
 EN_MONTHS = ["January", "February", "March", "April", "May", "June",
              "July", "August", "September", "October", "November", "December"]
 
-# Office icons lifted from the source PowerPoint deck (Document, Add,
-# Caret Up, Repeat, Filing Box), same as before.
+# Simple stroke-based icons (viewBox 0 0 24 24, round caps/joins) - one
+# per Change state, colored via the card header background they sit on
+# (STATE_COLOR) rather than needing their own fill color. Replaces an
+# earlier compound "document + small badge" icon lifted from the source
+# PowerPoint deck: cleaner at small size, and the card header text
+# already says "New Siemens Circular" / "Upgrade" / etc., so a second
+# "this is a document" icon in the corner was redundant, not just
+# unpolished.
 ICON_PATHS = {
-    "doc": ('<path d="M23 82 23 14 48 14 48 35 73 35 73 82 23 82ZM54 16.5 66.5 29 54 29 54 16.5ZM54 8 17 8 17 88 '
-            '79 88 79 30 54 8Z"/><rect x="29" y="45" width="38" height="4"/><rect x="29" y="37" width="13" '
-            'height="4"/><rect x="29" y="53" width="38" height="4"/><rect x="29" y="61" width="38" height="4"/>'
-            '<rect x="29" y="69" width="38" height="4"/>'),
-    "add": '<path d="M88 42 54 42 54 8 42 8 42 42 8 42 8 54 42 54 42 88 54 88 54 54 88 54Z"/>',
-    "caret": ('<path d="M23.993 64.122 19.751 59.878 48.007 31.628 76.257 59.878 72.015 64.121 48.007 40.112 '
-              '23.993 64.122Z"/>'),
-    "repeat": ('<path d="M20.9 57.6 40.1 38.4 29.4 38.4C32.9 31.6 40 26.9 48.2 26.9 53.5 26.9 58.4 28.9 62.1 32.2'
-               'L81.6 32.2C75.7 19.6 62.9 11 48.2 11 31.1 11 16.7 22.6 12.5 38.4L1.7 38.4 20.9 57.6Z"/>'
-               '<path d="M94.6 57.6 75.4 38.4 56.2 57.6 67 57.6C63.5 64.4 56.4 69.1 48.2 69.1 42.9 69.1 38 67.1 '
-               '34.3 63.8L14.7 63.8C20.7 76.4 33.4 85 48.2 85 65.3 85 79.7 73.4 83.9 57.6L94.6 57.6Z"/>'),
-    "archive": ('<rect x="10.006" y="18" width="76" height="12"/><path d="M13.006 34 13.006 78 83.006 78 83.006 34Z'
-                'M58.006 50 38.006 50 38.006 42 58.006 42Z"/>'),
+    "add": '<path d="M12 5v14M5 12h14"/>',
+    "caret": '<path d="M12 19V5M5 12l7-7 7 7"/>',
+    "repeat": ('<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/>'
+               '<path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>'),
+    "archive": ('<rect x="3" y="4" width="18" height="4" rx="1.3"/>'
+                '<path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 13h4"/>'),
 }
 
 CIRCULAR_CARDS = [("New Siemens Circular", "New", "add"), ("Upgrade", "Upgrade", "caret"),
@@ -138,31 +169,35 @@ CIRCULAR_CARDS = [("New Siemens Circular", "New", "add"), ("Upgrade", "Upgrade",
 STANDARD_CARDS = [("New Siemens Standard", "New", "add"), ("Upgrade", "Upgrade", "caret"),
                    ("Archivings", "Archiving", "archive")]
 
+# Detail pages are one continuous section per family now, not split by
+# New/Revised vs Archived - the per-row color stripe already carries
+# that distinction, so a separate "chapter" for it was redundant. Order
+# entries are sorted into within a section, matching the cover cards'
+# own bucket order.
+SECTION_STATE_ORDER = ["New", "Upgrade", "Update", "Archiving"]
 SECTIONS = [
-    ("Circular", ("New", "Upgrade", "Update"), "New or revised", "Circulars"),
-    ("Standard", ("New", "Upgrade", "Update"), "New or revised", "Standards"),
-    ("Circular", ("Archiving",), "Archived", "Circulars"),
-    ("Standard", ("Archiving",), "Archived", "Standards"),
+    ("Circular", "Circulars"),
+    ("Standard", "Standards"),
 ]
 
 CSS = """
 @page { size: A4 portrait; margin: 0; }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-body { font-family: 'Siemens Sans', Arial, Helvetica, sans-serif; color: %(NAVY)s; }
+body { font-family: 'Siemens Sans', Arial, Helvetica, sans-serif; color: %(WHITE)s; }
+/* Every page shares one background now - previously only the cover page
+   was navy and the detail pages were white/light. table rows stay light
+   (see below), so the effect is light "cards" floating on a dark page,
+   consistent front to back rather than switching palette mid-document. */
 .page { position: relative; width: 210mm; height: 297mm; overflow: hidden;
-        padding: 13mm 11mm 14mm 11mm; background: %(WHITE)s; display: flex; flex-direction: column; }
+        padding: 13mm 11mm 14mm 11mm; background: %(NAVY)s; display: flex; flex-direction: column; }
 /* page-break-after on every .page, including the last one, forces a genuine
    trailing blank page in Chromium's print pipeline - confirmed by counting
    physical PDF pages against logical ones. :not(:last-child) avoids it. */
 .page:not(:last-child) { page-break-after: always; }
-.page.cover { background: %(NAVY)s; color: %(WHITE)s; }
 
 h1 { font-size: 21pt; font-weight: 700; color: %(TEAL)s; margin: 0; line-height: 1.1; flex-shrink: 0; }
-.subtitle { font-size: 8.5pt; font-weight: 700; margin: 1.5mm 0 0 0; flex-shrink: 0; }
-.page.cover .subtitle { color: %(WHITE)s; }
-.page:not(.cover) .subtitle { color: %(NAVY)s; }
-.subtitle u { text-decoration: underline; }
+.subtitle { font-size: 8.5pt; font-weight: 700; margin: 1.5mm 0 0 0; flex-shrink: 0; color: %(WHITE)s; }
 
 /* ---------- footer: normal document flow, not position:absolute - an
    absolutely positioned footer doesn't know when the content above it
@@ -174,48 +209,174 @@ h1 { font-size: 21pt; font-weight: 700; color: %(TEAL)s; margin: 0; line-height:
    only ONE element should claim the leftover space. Without its own
    margin, .foot still lands at the bottom in practice: it is simply
    the last flex child on a page whose height is fixed. */
-.foot { flex-shrink: 0; padding-top: 4mm; display: flex; align-items: flex-end; gap: 4mm; font-size: 6.5pt; }
+.foot { flex-shrink: 0; padding-top: 4mm; display: flex; align-items: flex-end; gap: 4mm; font-size: 6.5pt; color: %(WHITE)s; }
 .foot .pg { font-weight: 700; white-space: nowrap; }
 .foot .meta { flex: 1; }
 .wordmark { width: 26mm; display: block; flex-shrink: 0; }
-.page.cover .foot { color: %(WHITE)s; }
+
+/* ---------- color legend: a single row of the four state colors, on
+   every page EXCEPT the cover (see LEGEND_HTML/_footer_html) - the
+   cover page already establishes what each color means through the
+   cards themselves, so repeating it there was redundant rather than
+   reassuring. No family (Circulars/Standards) swatches here either -
+   each detail page's own colored table header/border already answers
+   that, on that same page. Sits above the normal page-number/
+   classification line, inside the same flex-shrink:0 footer block -
+   counted into TABLE_BODY_BUDGET_MM like everything else in .foot. */
+.legend { flex-shrink: 0; padding-top: 3mm; border-top: 0.6pt solid rgba(255,255,255,0.25); }
+.legend-row { display: flex; align-items: center; gap: 4mm; font-size: 6.5pt; color: %(WHITE)s; }
+.legend-item { display: flex; align-items: center; gap: 1.3mm; }
+.legend-dot { width: 2.6mm; height: 2.6mm; border-radius: 50%%; flex-shrink: 0; display: inline-block; }
 
 /* ---------- cover ---------- */
-/* Only .band claims the page's leftover vertical space (flex-grow) -
-   .foot above deliberately has no auto-growth of its own; only ONE
-   element on the page should be the sole growing one. The circulars
-   band gets a larger share since it normally holds more content
-   (4 cards vs. Standards' 3). */
-.band { display: flex; gap: 3mm; margin-top: 6mm; flex: 1 1 auto; min-height: 0; }
-.band.circulars { flex-grow: 1.4; }
-.band-label { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 8pt; font-weight: 700;
-              letter-spacing: .4pt; display: flex; align-items: center; justify-content: center; width: 5mm; flex-shrink: 0; }
-.grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; align-content: stretch; grid-auto-rows: 1fr; }
+/* Bands take their own natural content height now, not a fixed
+   flex-grow share of the page - with empty buckets dropped and whole
+   bands sometimes empty, a fixed grow ratio (this used to assume
+   Circulars always has ~4 cards' worth of content) stretched a
+   2-card band or an empty-state placeholder to fill the same amount
+   of space a full band would have, which looked exactly as awkward
+   as the empty cards this whole change was meant to fix. Any real
+   leftover vertical space migrates to sit between the last band and
+   .note instead (see .note's margin-top: auto below) - one predictable
+   gap in a neutral spot, rather than distributed unevenly by a ratio
+   that no longer matches how much content is actually here. */
+.band { display: flex; gap: 4mm; margin-top: 12mm; flex-shrink: 0; }
+.band:first-of-type { margin-top: 9mm; }
+/* Vertical orientation, same as the original design - a full-width
+   horizontal bar was tried instead and reverted per feedback (too
+   heavy-handed a departure). Kept vertical, but bigger and paired with
+   a solid color bar of its own (not just colored text) - that combo is
+   what actually makes the boundary between the two bands unmistakable
+   at a glance, which plain rotated text on its own wasn't. */
+.band-sidebar { display: flex; align-items: stretch; gap: 3mm; flex-shrink: 0; }
+.band-bar { width: 4mm; border-radius: 2mm; flex-shrink: 0; }
+.band-bar.circ { background: %(CIRC)s; }
+.band-bar.std { background: %(STD)s; }
+.band-label { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 15pt; font-weight: 700;
+              letter-spacing: 1.4pt; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.band-label.circ { color: %(CIRC)s; }
+.band-label.std { color: %(STD)s; }
+.band-content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+/* flex:1 + grid-auto-rows:1fr + align-content:stretch used to be
+   needed so cards stretched to fill a band that itself flex-grew to
+   fill leftover page space. Now that .band sizes to its own natural
+   content instead (see .band above), the same properties do something
+   different and wrong: grid-auto-rows:1fr forces every row - and with
+   align-content:stretch, every card in every row - to the height of
+   whichever single card needs the most room, even across rows with
+   very different content. Confirmed via getComputedStyle: 4 cards
+   with 7/7/6/9 bullets respectively all reported the identical
+   343.8px height, and the whole grid inflated to match, closing what
+   should have been real margin before the footer to exactly zero.
+   grid-auto-rows:auto (each row sized to its own tallest card only)
+   is the fix - no more forced equalization across unrelated rows. */
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; align-content: start; grid-auto-rows: auto; }
+/* A card that's alone in the last row (an odd count after empty
+   buckets are dropped - see _cover_pages_html) spans both columns
+   instead of leaving a visibly blank cell beside it - part of the
+   same "no empty-looking box" fix as dropping empty cards entirely. */
+/* Spans both columns so it can be centered within the row (grid-column
+   alone would stretch it to fill that whole span, hence justify-self:
+   center + an explicit width matching one normal column - half of the
+   two-column-plus-gap span, minus half that gap - so it reads as "one
+   normal card, centered" rather than "one card stretched to double
+   width" or "one card pinned to the left with empty space beside it". */
+.card.wide { grid-column: 1 / -1; justify-self: center; width: calc(50%% - 1.5mm); }
 .card { display: flex; flex-direction: column; }
-.card-h { background: %(TEAL)s; color: %(WHITE)s; font-size: 10pt; font-weight: 700; padding: 2.4mm 3.6mm 2.4mm 3mm;
+/* Rounded on all four corners (not just the top) now that the header and
+   body are visually one continuous card rather than a flat-topped tab -
+   part of the general move to rounder, softer edges throughout. Header
+   background is set inline per card (one of the four STATE_COLOR values)
+   rather than fixed here, since New/Upgrade/Update/Archiving each need
+   their own color - see _card_html(). */
+.card-h { color: %(WHITE)s; font-size: 10pt; font-weight: 700; padding: 2.4mm 3.6mm 2.4mm 3mm;
           display: flex; align-items: center; justify-content: space-between; gap: 2mm;
-          border-radius: 1.2mm 1.2mm 0 0; min-height: 10mm; flex: 0 0 auto; }
-.card-b { background: %(GREY)s; color: %(NAVY)s; padding: 2.5mm 3mm 3mm 3mm; border-radius: 0 0 1.2mm 1.2mm; }
+          border-radius: 2.6mm 2.6mm 0 0; min-height: 10mm; flex: 0 0 auto; }
+.card-b { background: %(GREY)s; color: %(NAVY)s; padding: 2.5mm 3mm 3mm 3mm; border-radius: 0 0 2.6mm 2.6mm; }
 .card-b ul { margin: 0; padding-left: 3.4mm; }
 .card-b li { font-size: 8pt; line-height: 1.25; margin-bottom: 1.2mm; }
 .card-b li:last-child { margin-bottom: 0; }
-.card-b li.empty { list-style: none; padding-left: 0; }
-.cardicon { position: relative; display: inline-block; width: 7mm; height: 7mm; flex: 0 0 auto; }
-.ico { position: absolute; inset: 0; width: 100%%; height: 100%%; }
-.ico.badge { width: 42%%; height: 42%%; inset: -0.2mm -0.2mm auto auto; }
-.ico.solo { width: 78%%; height: 78%%; inset: auto 0 0 auto; }
+.cardicon { display: flex; align-items: center; justify-content: center; width: 6.4mm; height: 6.4mm; flex: 0 0 auto; }
+.cardicon svg { width: 100%%; height: 100%%; }
+/* A fixed set of cards is always shown now (4 for Circulars, 3 for
+   Standards), even when a bucket is empty - shown once, then dropped
+   per feedback that a variable number of boxes looked inconsistent
+   from quarter to quarter. An empty bucket gets this instead of an
+   empty bullet list: centered (both axes, via .card-b.empty - the
+   card still stretches to match its row-mate's height via the grid's
+   own default align-items:stretch, so this can end up taller than one
+   line and should stay centered rather than pinned to the top), muted
+   and italic so it reads as a deliberate "nothing here" rather than
+   missing content. */
+.card-b.empty { display: flex; align-items: center; justify-content: center; }
+.card-empty { margin: 0; text-align: center; font-style: italic; font-size: 8pt;
+              color: rgba(0, 0, 40, 0.45); }
 
-.note { margin-top: 6mm; border: 0.5pt solid %(WHITE)s; padding: 2.6mm 3mm; font-size: 7.5pt; line-height: 1.35; flex-shrink: 0; }
+.note { margin-top: auto; border: 0.5pt solid %(WHITE)s; border-radius: 2.2mm; padding: 2.6mm 3mm;
+        font-size: 7.5pt; line-height: 1.35; flex-shrink: 0; }
 .note a { color: %(WHITE)s; }
 
 /* ---------- detail tables ---------- */
-table { width: 100%%; border-collapse: collapse; table-layout: fixed; margin-top: 4mm; border: 0.8pt solid %(TEAL)s; }
+/* Rounded outer corners come from this wrapper (border + border-radius +
+   overflow:hidden clipping the table's own square corners), not from the
+   table element itself - a <table> can't reliably take a border-radius
+   directly (border-collapse fights it), but a div wrapping it can, and
+   clips whatever's inside to match. Border color is the same family
+   system as the band label / subtitle underline - set inline per table
+   (CIRC or STD) by build(), not fixed here. */
+/* No border-left here (see below) - the left edge belongs entirely to
+   each row's own state-color stripe, not to this wrapper's family
+   color. The two used to sit immediately next to each other as two
+   thin, differently-colored lines, which read as a cluttered "mixed"
+   edge rather than the one clear color it was meant to be - confirmed
+   by zooming into an actual rendered page, not assumed. */
+.table-wrap { margin-top: 4mm; border-radius: 3mm; overflow: hidden; border: 1pt solid; border-left: none; }
+table { width: 100%%; border-collapse: collapse; table-layout: fixed; }
 th, td { background: %(GREY)s; border: 0.9pt solid %(WHITE)s; padding: 1.6mm 2mm; font-size: 7.5pt;
          line-height: 1.3; vertical-align: middle; overflow-wrap: break-word; }
-th { font-weight: 700; text-align: center; }
+/* Header row background is the family color (not grey) with white text -
+   an immediate "this whole table is Circulars / Standards" signal that
+   doesn't depend on reading the subtitle above it. Set inline per table
+   alongside the wrapper border, for the same reason. */
+th { font-weight: 700; text-align: center; color: %(WHITE)s; }
+/* Body cells need their own dark text - white body text (the page-wide
+   default, correct for the navy page itself) on this light grey is
+   ~1.3:1 contrast, nowhere near legible; confirmed by computing the
+   actual ratio, not by judging it on screen. Navy on this same grey is
+   the pattern .card-b already uses successfully (~15:1) - applying it
+   here too rather than introducing a different fix for what is the
+   same underlying problem (dark text needed on a light background). */
+td { color: %(NAVY)s; }
 td.c-gov, td.c-no, td.c-ver { text-align: center; }
 td.c-title { text-align: center; overflow-wrap: anywhere; word-break: break-word; hyphens: auto; }
 td.c-sum { text-align: left; }
+/* The Change-state stripe on c-gov (New/Upgrade/Update/Archiving, one of
+   the four STATE_COLOR values, set inline per row block by
+   _block_rows_html()) carries the cover page's color code into the
+   detail tables - the same visual language both places, not just a
+   color scheme that happens to reappear. c-gov carries it rather than a
+   dedicated column because it already spans the full row block via
+   rowspan, so one border runs the block's whole height for free. */
+/* Widened from 3.5pt - the one and only color on this edge now that
+   the wrapper no longer has its own competing left border (see
+   .table-wrap), so it can afford - and benefits from - being more
+   prominent. */
+/* th.c-gov included here too (not just td.c-gov) - matching width is
+   what makes the header's own left-edge line (see _table_head_html)
+   read as a continuation of the body stripe below it, rather than an
+   abrupt change from a thin 0.9pt white border to a thick 6pt colored
+   one right at the header/body boundary. */
+th.c-gov, td.c-gov { border-left-width: 6pt; }
+/* The header row gets the same left-edge treatment, in its own color
+   (the family color it already has as a background, set inline
+   alongside it in _table_head_html so the border exactly matches the
+   fill rather than approximating it) - without this, the state-color
+   stripe just starts abruptly at the first data row with nothing
+   above it, which reads as the bar stopping short rather than a
+   deliberate design element. Same width as the data-row stripes below
+   it, so the two read as one continuous bar that happens to change
+   color at each section boundary, not as two unrelated details. */
+th.c-gov { border-left-width: 6pt; }
 /* c-gov is 23mm, not a rounder-looking 21 or 22 - measured directly (real
    Chromium, canvas.measureText): the single word "responsibility" alone at
    bold 7.5pt is 65.0px wide, and 21mm only gives 64.25px of usable width
@@ -224,7 +385,7 @@ td.c-sum { text-align: left; }
    word specifically before narrowing this column again. */
 .c-gov { width: 23mm; } .c-no { width: 19mm; } .c-title { width: 34mm; } .c-ver { width: 16mm; }
 a { color: %(LINK)s; }
-""" % dict(NAVY=NAVY, TEAL=TEAL, GREY=GREY, WHITE=WHITE, LINK=LINK)
+""" % dict(NAVY=NAVY, TEAL=TEAL, GREY=GREY, WHITE=WHITE, LINK=LINK, CIRC=CIRC, STD=STD)
 
 
 # ---------------------------------------------------------------------
@@ -251,6 +412,12 @@ _CARD_LINE_HEIGHT_MM = 8 * 1.25 * _PT_TO_MM     # matches CSS .card-b li{font-si
 _CARD_BULLET_GAP_MM = 1.2                        # .card-b li{margin-bottom:1.2mm}
 _CARD_BODY_V_PADDING_MM = 2.5 + 3                # .card-b{padding:2.5mm ... 3mm}
 _CARD_HEADER_H_MM = 10                           # .card-h{min-height:10mm}
+# .band-header no longer exists as a horizontal bar (reverted to a
+# vertical sidebar that stretches alongside the content instead - see
+# .band-sidebar), so it no longer adds its own height on top of the
+# band's content - removed from the height sum below accordingly.
+# .band-empty placeholder box shown when a whole band has nothing in it
+_BAND_EMPTY_H_MM = 20
 
 TABLE_CONTENT_WIDTH_MM = 188      # page width 210mm - 11mm margins each side
 COL_GOV_MM, COL_NO_MM, COL_TITLE_MM, COL_VER_MM = 23, 19, 34, 16   # must match the CSS widths above
@@ -264,7 +431,7 @@ CARD_BODY_TEXT_WIDTH_MM = CARD_WIDTH_MM - 6 - 3.4   # card padding (3mm each sid
 # derived purely analytically from the surrounding box model - the
 # header, subtitle, note box and page padding all contribute and are
 # easier to confirm by rendering than to add up by hand.
-COVER_BANDS_BUDGET_MM = 205
+COVER_BANDS_BUDGET_MM = 200
 
 # Vertical budget for a detail table page's row content, same
 # validate-by-rendering approach: 297mm page - 13mm/14mm padding -
@@ -282,20 +449,38 @@ def _wrapped_lines(text, width_mm, char_width_mm):
 
 
 def _card_body_height_mm(bullets):
+    """An empty bucket (no bullets) still needs a real height estimate
+    now that it always renders as a card - one centered line of muted
+    "Nothing to report this quarter" text (see .card-empty), not zero."""
     if not bullets:
-        return _CARD_BODY_V_PADDING_MM + _CARD_LINE_HEIGHT_MM  # one empty-state bullet
+        return _CARD_HEADER_H_MM + _CARD_LINE_HEIGHT_MM + _CARD_BODY_V_PADDING_MM
     lines = sum(_wrapped_lines(b, CARD_BODY_TEXT_WIDTH_MM, _CARD_CHAR_WIDTH_MM) for b in bullets)
-    return lines * _CARD_LINE_HEIGHT_MM + max(0, len(bullets) - 1) * _CARD_BULLET_GAP_MM + _CARD_BODY_V_PADDING_MM
+    return (_CARD_HEADER_H_MM + lines * _CARD_LINE_HEIGHT_MM
+            + max(0, len(bullets) - 1) * _CARD_BULLET_GAP_MM + _CARD_BODY_V_PADDING_MM)
 
 
 def _band_height_mm(card_bodies_mm):
-    """card_bodies_mm: one pre-computed body height per card, 2 cards per
-    visual row (CSS grid-template-columns: 1fr 1fr) - a row's height is
-    set by its taller card, same as the browser's own grid layout will
-    resolve at render time; this only needs to match that for the
-    page-count decision, not reproduce it pixel-for-pixel."""
-    rows_h = [_CARD_HEADER_H_MM + max(card_bodies_mm[i:i + 2])
-              for i in range(0, len(card_bodies_mm), 2)]
+    """card_bodies_mm: one pre-computed total height (header + body) per
+    card, always the full fixed set (4 for Circulars, 3 for Standards -
+    an empty bucket still contributes its own "nothing to report"
+    height, it's never left out). Cards pair up 2-per-row (CSS
+    grid-template-columns: 1fr 1fr), except a trailing lone card
+    (Standards' 3rd), which spans both columns (.card.wide) and so
+    counts as its own full-width row. A row's height is set by its
+    taller card, same as the browser's own grid layout will resolve at
+    render time; this only needs to match that for the page-count
+    decision, not reproduce it pixel-for-pixel. The vertical sidebar
+    label stretches to match whatever height this comes out to (see
+    .band-sidebar), so it doesn't add anything of its own."""
+    rows_h = []
+    i = 0
+    while i < len(card_bodies_mm):
+        if i == len(card_bodies_mm) - 1:
+            rows_h.append(card_bodies_mm[i])  # lone trailing card, full width, its own row
+            i += 1
+        else:
+            rows_h.append(max(card_bodies_mm[i], card_bodies_mm[i + 1]))
+            i += 2
     return sum(rows_h) + max(0, len(rows_h) - 1) * CARD_GAP_MM
 
 
@@ -377,12 +562,38 @@ def parse_quarter(v):
 NO_VERSION = {"", "TBD", "TBA", "N/A", "-", "OFFEN", "OPEN"}
 
 
-def version_display(current, planned):
+def _ensure_decimal(v):
+    """Version numbers like '3' (no decimal point - typically because the
+    source cell held a plain Excel number, not text, so a whole number
+    lost its trailing '.0' when the cell converted to text) are shown as
+    '3.0', matching the one-decimal-or-more format every other version
+    uses. Anything that already has a decimal point, or isn't a plain
+    integer to begin with (blank, "TBD", etc.), is left exactly as-is."""
+    return v + ".0" if v and re.match(r"^\d+$", v) else v
+
+
+def version_display(current, planned, change=None):
+    """New and Archiving don't have a version *transition* - only Update
+    and Upgrade do. Forcing that here (rather than just trusting Current
+    Version / Planned Version to be filled in "correctly" per Change)
+    means a stray value in the "wrong" cell can't accidentally produce a
+    nonsensical arrow - e.g. someone fills in a Current Version for a
+    brand-new regulation, or the same version in both cells for an
+    archiving: New always shows just the one version (whichever is
+    filled - normally Planned, since New has nothing to have a "current"
+    version of); Archiving always shows just the one version being
+    archived (whichever is filled - normally Current). Neither ever
+    shows an arrow, regardless of what's in the other cell."""
     cur, pln = (current or "").strip(), (planned or "").strip()
     if pln.upper() in NO_VERSION:
         pln = ""
     if cur.upper() in NO_VERSION:
         cur = ""
+    cur, pln = _ensure_decimal(cur), _ensure_decimal(pln)
+    if change == "New":
+        return pln or cur
+    if change == "Archiving":
+        return cur or pln
     if cur and pln and cur != pln:
         return f"{cur} {ARROW} {pln}"
     return pln or cur
@@ -419,7 +630,7 @@ def _finish_item(it, pubdate_str):
 # ---------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------
-CIRCULARS_SHEET = "Circulars"
+CIRCULARS_SHEETS = ("Roadmap", "Circulars")
 SUMMARY_SHEETS = ("Summary", "Changes", "Zusammenfassung")
 META_SHEET = "Meta"
 
@@ -443,9 +654,10 @@ def load_from_xlsx(xlsx_path: str, quarter: str = None) -> dict:
     Reads bus_data.xlsx and returns the dict build() expects:
     {"meta": {...}, "items": [...]}. Prefers the "Summary" sheet
     (English + German, archivings, anything hand-added); falls back to
-    reading "Circulars" directly if there is no Summary sheet yet
-    (English only, no archivings - everything that sheet cannot
-    express: unknown stays unknown, nothing is invented).
+    reading the roadmap sheet directly if there is no Summary sheet yet
+    (accepts "Roadmap" or "Circulars" as that sheet's name - see
+    CIRCULARS_SHEETS) (English only, no archivings - everything that
+    sheet cannot express: unknown stays unknown, nothing is invented).
     `quarter` overrides auto-detection (e.g. "Q4/2026").
     """
     from openpyxl import load_workbook
@@ -473,14 +685,19 @@ def load_from_xlsx(xlsx_path: str, quarter: str = None) -> dict:
         pubdate = date.today().strftime("%d-%m-%Y")
     meta["Publication date"] = pubdate
     meta.setdefault("Classification", "Restricted")
-    meta.setdefault("Governance Office", "Siemens Governance Office (P&O TO OD RG GOV)")
-    meta.setdefault("Contact unit", "P&O TO OD RG GOV")
+    # "RG" dropped from the org code (was "P&O TO OD RG GOV") - the
+    # reorganization effective October 1 retires that segment, and this
+    # document is always published after that date, so the old code
+    # would already be wrong on every document it's ever used for.
+    meta.setdefault("Governance Office", "Siemens Governance Office (P&O TO OD GOV)")
+    meta.setdefault("Contact unit", "P&O TO OD GOV")
     meta.setdefault("Contact mail", "governance@siemens.com")
     meta.setdefault("Contact unit link", "#")
 
     road_rows = []
-    if CIRCULARS_SHEET in sheets:
-        ws = wb[CIRCULARS_SHEET]
+    circulars_sheet = next((n for n in CIRCULARS_SHEETS if n in sheets), None)
+    if circulars_sheet:
+        ws = wb[circulars_sheet]
         headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
         idx = {h: i for i, h in enumerate(headers) if h}
         for row in ws.iter_rows(min_row=2, values_only=True):
@@ -556,13 +773,14 @@ def load_from_xlsx(xlsx_path: str, quarter: str = None) -> dict:
             rq = cell(row, c_q)
             if quarter and rq and parse_quarter(rq) != parse_quarter(quarter):
                 continue
+            change = cell(row, c_chg)
             if c_curver is not None or c_plnver is not None:
-                ver = version_display(cell(row, c_curver), cell(row, c_plnver))
+                ver = version_display(cell(row, c_curver), cell(row, c_plnver), change)
             else:
                 ver = cell(row, c_ver_legacy)
             it = {
                 "type": infer_type(num, cell(row, c_type)),
-                "change": cell(row, c_chg),
+                "change": change,
                 "gov": cell(row, c_gov), "number": num, "version": ver,
                 "title_en": title_en, "link_en": cell(row, c_len), "summary_en": cell(row, c_sen),
                 "title_de": cell(row, c_tde), "link_de": cell(row, c_lde), "summary_de": cell(row, c_sde),
@@ -579,7 +797,7 @@ def load_from_xlsx(xlsx_path: str, quarter: str = None) -> dict:
             it = {
                 "type": infer_type(r["number"]), "change": r["change"], "gov": r["gov"],
                 "number": r["number"],
-                "version": version_display(r["currentVersion"], r["plannedVersion"]),
+                "version": version_display(r["currentVersion"], r["plannedVersion"], r["change"]),
                 "title_en": r["title"], "link_en": r["link"], "summary_en": r["summary"],
                 "title_de": "", "link_de": r["link"], "summary_de": "", "archived_into": "",
             }
@@ -600,14 +818,10 @@ def load_from_xlsx(xlsx_path: str, quarter: str = None) -> dict:
 # ---------------------------------------------------------------------
 # HTML assembly
 # ---------------------------------------------------------------------
-def _icon_svg(key, cls=""):
-    return f'<svg class="ico {cls}" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg" fill="currentColor">{ICON_PATHS[key]}</svg>'
-
-
-def _card_icon(kind, badge):
-    if kind == "Circular":
-        return f'<span class="cardicon">{_icon_svg("doc")}{_icon_svg(badge, "badge")}</span>'
-    return f'<span class="cardicon">{_icon_svg(badge, "solo")}</span>'
+def _icon_svg(key):
+    return (f'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" '
+            f'stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'
+            f'{ICON_PATHS[key]}</svg>')
 
 
 def _bullet_html(it):
@@ -615,14 +829,23 @@ def _bullet_html(it):
     return f"<li>{esc(it['title_en'])}{suffix}</li>"
 
 
-def _card_html(label, kind, change, icon, items):
+def _card_html(label, kind, change, icon, items, wide=False):
+    """Always renders - a fixed set of boxes (4 for Circulars, 3 for
+    Standards) shown every time regardless of content, per explicit
+    preference over the alternative (dropping empty buckets entirely)
+    tried first. A bucket with nothing in it gets a clean "nothing to
+    report" body instead of an empty bullet list, so it still reads as
+    an intentional, organized empty state rather than a broken box."""
     bullets = [it for it in items if it["type"] == kind and it["change"] == change]
+    color = STATE_COLOR[change]
+    cls = "card wide" if wide else "card"
     if bullets:
-        lis = "".join(_bullet_html(it) for it in bullets)
+        body_cls, body = "card-b", f'<ul>{"".join(_bullet_html(it) for it in bullets)}</ul>'
     else:
-        lis = "<li class='empty'>&nbsp;</li>"
-    return (f'<div class="card"><div class="card-h"><span>{esc(label)}</span>{_card_icon(kind, icon)}</div>'
-            f'<div class="card-b"><ul>{lis}</ul></div></div>')
+        body_cls, body = "card-b empty", '<p class="card-empty">Nothing to report this quarter.</p>'
+    return (f'<div class="{cls}"><div class="card-h" style="background:{color}">'
+            f'<span>{esc(label)}</span><span class="cardicon">{_icon_svg(icon)}</span></div>'
+            f'<div class="{body_cls}">{body}</div></div>')
 
 
 def _title_cell(title, link):
@@ -638,11 +861,12 @@ def _block_rows_html(it):
     if it["title_de"] or it["summary_de"]:
         langs.append((it["title_de"], it["link_de"], it["summary_de"]))
     span = len(langs)
+    stripe = STATE_COLOR.get(it["change"], GREY)
     rows = []
     for n, (title, link, summary) in enumerate(langs):
         meta_cells = ""
         if n == 0:
-            meta_cells = (f'<td class="c-gov" rowspan="{span}">{esc(it["gov"])}</td>'
+            meta_cells = (f'<td class="c-gov" rowspan="{span}" style="border-left-color:{stripe}">{esc(it["gov"])}</td>'
                           f'<td class="c-no" rowspan="{span}">{esc(it["number"])}</td>')
         ver_cell = f'<td class="c-ver" rowspan="{span}">{esc(it["version"])}</td>' if n == 0 else ""
         rows.append(f'<tr>{meta_cells}<td class="c-title">{_title_cell(title, link)}</td>{ver_cell}'
@@ -651,27 +875,77 @@ def _block_rows_html(it):
 
 
 def _table_head_html(kind):
-    return ("<thead><tr><th class='c-gov'>Governance responsibility</th>"
-            f"<th class='c-no'>{kind} number</th><th class='c-title'>{kind} title</th>"
-            "<th class='c-ver'>Version</th><th class='c-sum'>Summary</th></tr></thead>")
+    color = FAMILY_COLOR[kind]
+    # c-gov's border-left is set to the same color as its own background -
+    # continuing the same 6pt-wide colored edge the body rows use (see
+    # .c-gov CSS), just in the family color here since the header has no
+    # per-row Change state of its own. Matching width/color at this
+    # boundary is what makes it read as one continuous line down the
+    # table rather than stopping abruptly at the header.
+    th = lambda cls, text, extra="": f"<th class='{cls}' style='background:{color}{extra}'>{text}</th>"
+    gov_th = th("c-gov", "Governance responsibility", f";border-left-color:{color}")
+    return ("<thead><tr>" + gov_th + th("c-no", f"{kind} number")
+            + th("c-title", f"{kind} title") + th("c-ver", "Version") + th("c-sum", "Summary") + "</tr></thead>")
+
+
+# The color legend - a single row explaining the four state colors
+# (New/Upgrade/Update/Archived). Shown from page 2 onward only: page 1
+# (the cover) already establishes what each color means through the
+# cards themselves - repeating it there would be redundant, not
+# reassuring. Family colors (Circulars=teal, Standards=blue) aren't in
+# this legend either - each detail page's own colored header/border
+# already shows which family it is, on that same page. Built once at
+# import time rather than per page, since it never varies.
+_LEGEND_STATES = [("New", "New"), ("Upgrade", "Upgrade"), ("Update", "Update"), ("Archiving", "Archived")]
+
+LEGEND_HTML = '<div class="legend"><div class="legend-row">' + "".join(
+    f'<span class="legend-item"><span class="legend-dot" style="background:{STATE_COLOR[chg]}"></span>{esc(label)}</span>'
+    for chg, label in _LEGEND_STATES) + '</div></div>'
 
 
 def _footer_html(page_num, total_pages, meta):
-    return (f'<div class="foot"><span class="pg">Page {page_num} of {total_pages}</span>'
+    legend = LEGEND_HTML if page_num > 1 else ""
+    return (legend
+            + f'<div class="foot"><span class="pg">Page {page_num} of {total_pages}</span>'
             f'<span class="meta">{esc(meta.get("Classification","Restricted"))} | '
             f'\u00a9 Siemens {esc(meta.get("Copyright year") or meta.get("Publication date","")[-4:])} | '
             f'{esc(meta.get("Governance Office",""))} | {esc(meta.get("Publication date",""))}</span>'
             f'{WORDMARK}</div>')
 
 
+def _band_html(css_class, label_cls, header_text, cards_html):
+    """cards_html: the full fixed set of card HTML strings for this
+    band (always 4 for Circulars, always 3 for Standards - see
+    _cover_pages_html), in CIRCULAR_CARDS/STANDARD_CARDS order. A
+    trailing lone card (Standards' 3rd) already carries the "wide"
+    class from _cover_pages_html, so it spans both grid columns
+    instead of sitting next to a visibly blank cell - a fixed
+    structural fact now that the card count itself is fixed, not a
+    per-render decision."""
+    sidebar = (f'<div class="band-sidebar"><span class="band-bar {label_cls}"></span>'
+              f'<span class="band-label {label_cls}">{esc(header_text)}</span></div>')
+    body = f'<div class="grid">{"".join(cards_html)}</div>'
+    return f'<div class="band {css_class}">{sidebar}<div class="band-content">{body}</div></div>'
+
+
 def _cover_pages_html(items, quarter, meta):
     subtitle = f"New, revised or archived Siemens Circulars and Siemens Standards in {esc(quarter)}"
-    circ_bullets = [_card_html(*spec, items) for spec in [(l, "Circular", c, i) for l, c, i in CIRCULAR_CARDS]]
-    std_bullets = [_card_html(*spec, items) for spec in [(l, "Standard", c, i) for l, c, i in STANDARD_CARDS]]
 
     def _bucket_texts(kind, change):
         return [f"{b['title_en']} ({b['number']})" if b["number"] else b["title_en"]
                 for b in items if b["type"] == kind and b["change"] == change]
+
+    def _build_cards(specs, kind):
+        # The last card in an odd-length list (Standards' 3rd, Archivings)
+        # spans the full row width rather than sitting alone next to an
+        # empty grid cell - fixed for this kind, since the bucket count
+        # itself is fixed, not dependent on which buckets are empty.
+        wide_index = len(specs) - 1 if len(specs) % 2 == 1 else -1
+        return [_card_html(label, kind, chg, icon, items, wide=(i == wide_index))
+                for i, (label, chg, icon) in enumerate(specs)]
+
+    circ_cards = _build_cards(CIRCULAR_CARDS, "Circular")
+    std_cards = _build_cards(STANDARD_CARDS, "Standard")
 
     circ_bodies = [_card_body_height_mm(_bucket_texts("Circular", chg)) for _, chg, _ in CIRCULAR_CARDS]
     std_bodies = [_card_body_height_mm(_bucket_texts("Standard", chg)) for _, chg, _ in STANDARD_CARDS]
@@ -683,37 +957,42 @@ def _cover_pages_html(items, quarter, meta):
             f'(<a href="{esc(meta.get("Contact unit link","#"))}">{esc(meta.get("Contact unit",""))}</a>, '
             f'<a href="mailto:{esc(meta.get("Contact mail",""))}">{esc(meta.get("Contact mail",""))}</a>).')
 
+    circ_band = _band_html("circulars", "circ", "CIRCULARS", circ_cards)
+    std_band = _band_html("standards", "std", "STANDARDS", std_cards)
+
     pages = []
     if circ_h + std_h <= COVER_BANDS_BUDGET_MM:
         body = (f'<h1>Summary of regulatory changes</h1><div class="subtitle">{subtitle}</div>'
-                f'<div class="band circulars"><div class="band-label">CIRCULARS</div><div class="grid">{"".join(circ_bullets)}</div></div>'
-                f'<div class="band"><div class="band-label">STANDARDS</div><div class="grid">{"".join(std_bullets)}</div></div>'
-                f'<div class="note">{note}</div>')
+                f'{circ_band}{std_band}<div class="note">{note}</div>')
         pages.append(f'<div class="page cover">{body}</div>')
     else:
-        body1 = (f'<h1>Summary of regulatory changes</h1><div class="subtitle">{subtitle}</div>'
-                 f'<div class="band circulars"><div class="band-label">CIRCULARS</div><div class="grid">{"".join(circ_bullets)}</div></div>')
+        body1 = f'<h1>Summary of regulatory changes</h1><div class="subtitle">{subtitle}</div>{circ_band}'
         pages.append(f'<div class="page cover">{body1}</div>')
-        body2 = (f'<h1>Summary of regulatory changes</h1><div class="subtitle">{subtitle}</div>'
-                 f'<div class="band"><div class="band-label">STANDARDS</div><div class="grid">{"".join(std_bullets)}</div></div>'
-                 f'<div class="note">{note}</div>')
+        body2 = f'<h1>Summary of regulatory changes</h1><div class="subtitle">{subtitle}</div>{std_band}<div class="note">{note}</div>'
         pages.append(f'<div class="page cover">{body2}</div>')
     return pages
 
 
 def _detail_pages_html(items, quarter):
     pages = []
-    for kind, changes, prefix, noun in SECTIONS:
-        entries = [it for it in items if it["type"] == kind and it["change"] in changes]
+    for kind, noun in SECTIONS:
+        entries = [it for it in items if it["type"] == kind]
         if not entries:
             continue
-        subtitle = f'<u>{esc(prefix)} </u>Siemens <u>{esc(noun)}</u> in {esc(quarter)}'
+        # Stable sort: New, Upgrade, Update, Archiving, in that order -
+        # matches the cover cards' own bucket order. Ties (same Change)
+        # keep their original relative order from the source data.
+        entries = sorted(entries, key=lambda it: SECTION_STATE_ORDER.index(it["change"])
+                         if it["change"] in SECTION_STATE_ORDER else len(SECTION_STATE_ORDER))
+        family_color = FAMILY_COLOR[kind]
+        subtitle = f"Changes to {esc(noun)} in {esc(quarter)}"
         chunks = _chunk_by_height(entries, TABLE_BODY_BUDGET_MM, MAX_ROWS_PER_TABLE_PAGE)
         head = _table_head_html(kind)
         for chunk in chunks:
             rows = "".join(_block_rows_html(it) for it in chunk)
             body = (f'<h1>Summary of regulatory changes</h1><div class="subtitle">{subtitle}</div>'
-                    f'<table>{head}<tbody>{rows}</tbody></table>')
+                    f'<div class="table-wrap" style="border-color:{family_color}">'
+                    f'<table>{head}<tbody>{rows}</tbody></table></div>')
             pages.append(f'<div class="page">{body}</div>')
     return pages
 
