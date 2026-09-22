@@ -10,12 +10,6 @@ the hosting sandbox. HTML-only is pure string-building and a file
 write - nothing that can hang. If a PDF is needed, open the HTML in
 any browser and use its own Print to PDF.
 
-There is no preliminary/published distinction for this document - it
-is always the current, complete picture of the target quarter as the
-Summary sheet stands right now. Don't add a draft/final split back in;
-it doesn't correspond to anything in the real publishing process this
-generates for.
-
 USAGE (from Code Interpreter):
     python generate_summary.py /path/to/bus_data.xlsx
 
@@ -165,7 +159,7 @@ ICON_PATHS = {
 }
 
 CIRCULAR_CARDS = [("New Siemens Circular", "New", "add"), ("Upgrade", "Upgrade", "caret"),
-                   ("Update", "Update", "repeat"), ("Archivings", "Archiving", "archive")]
+                   ("Archivings", "Archiving", "archive"), ("Update", "Update", "repeat")]
 STANDARD_CARDS = [("New Siemens Standard", "New", "add"), ("Upgrade", "Upgrade", "caret"),
                    ("Archivings", "Archiving", "archive")]
 
@@ -229,19 +223,43 @@ h1 { font-size: 21pt; font-weight: 700; color: %(TEAL)s; margin: 0; line-height:
 .legend-dot { width: 2.6mm; height: 2.6mm; border-radius: 50%%; flex-shrink: 0; display: inline-block; }
 
 /* ---------- cover ---------- */
-/* Bands take their own natural content height now, not a fixed
-   flex-grow share of the page - with empty buckets dropped and whole
-   bands sometimes empty, a fixed grow ratio (this used to assume
-   Circulars always has ~4 cards' worth of content) stretched a
-   2-card band or an empty-state placeholder to fill the same amount
-   of space a full band would have, which looked exactly as awkward
-   as the empty cards this whole change was meant to fix. Any real
-   leftover vertical space migrates to sit between the last band and
-   .note instead (see .note's margin-top: auto below) - one predictable
-   gap in a neutral spot, rather than distributed unevenly by a ratio
-   that no longer matches how much content is actually here. */
-.band { display: flex; gap: 4mm; margin-top: 12mm; flex-shrink: 0; }
-.band:first-of-type { margin-top: 9mm; }
+/* Both bands now share the page's available vertical space equally
+   (flex: 1, same ratio for both) rather than sizing to their own
+   natural content - the whole point of this layout is that every box
+   on the page, Circulars or Standards, ends up the same size
+   regardless of how much content it holds, which only happens if
+   both bands claim an equal share of the same total space. An
+   earlier version gave bands their natural content height instead
+   (with .note absorbing whatever was left over) specifically to avoid
+   stretching a sparse band - that was the right call when box count
+   and content varied page to page and stretching made the
+   inconsistency more visible, not less. It's the opposite call here
+   on purpose: a fixed 2x2 layout (see CIRCULAR_CARDS/STANDARD_CARDS)
+   makes uniform, page-filling boxes the actual goal, not a bug to
+   avoid.
+
+   Flex's own default min-height-from-content is what's supposed to
+   protect against a genuinely tall block of text being squeezed
+   smaller than it needs, growing a band beyond its equal share rather
+   than letting content overflow it - but only if nothing in the chain
+   overrides that default. An earlier version of this rule added
+   min-height:0 here (and on .band-content, .card) specifically to
+   force the equal split - which also silently disabled that exact
+   protection. Confirmed as a real bug, not a theoretical one: with
+   that override in place, a card's grid was measured 33px taller than
+   its own containing band, invisibly overflowing past .page's own
+   overflow:hidden. Removed everywhere in this chain - _band_height_mm
+   / COVER_BANDS_BUDGET_MM in the Python code still separately decides
+   the 1-page-vs-2-page split from content's natural minimum, so the
+   two mechanisms now agree instead of fighting each other. */
+.band { display: flex; gap: 4mm; margin-top: 12mm; flex: 1; }
+/* Not :first-of-type - a div.subtitle sits before both bands, so
+   neither .band is ever literally the first div among its siblings
+   and the rule never matched at all (confirmed by inspecting computed
+   margin-top on both bands: both reported 12mm). Targeting the
+   .circulars / .standards classes _band_html already gives each band
+   is unambiguous instead of relying on sibling position. */
+.band.circulars { margin-top: 9mm; }
 /* Vertical orientation, same as the original design - a full-width
    horizontal bar was tried instead and reverted per feedback (too
    heavy-handed a departure). Kept vertical, but bigger and paired with
@@ -257,31 +275,18 @@ h1 { font-size: 21pt; font-weight: 700; color: %(TEAL)s; margin: 0; line-height:
 .band-label.circ { color: %(CIRC)s; }
 .band-label.std { color: %(STD)s; }
 .band-content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-/* flex:1 + grid-auto-rows:1fr + align-content:stretch used to be
-   needed so cards stretched to fill a band that itself flex-grew to
-   fill leftover page space. Now that .band sizes to its own natural
-   content instead (see .band above), the same properties do something
-   different and wrong: grid-auto-rows:1fr forces every row - and with
-   align-content:stretch, every card in every row - to the height of
-   whichever single card needs the most room, even across rows with
-   very different content. Confirmed via getComputedStyle: 4 cards
-   with 7/7/6/9 bullets respectively all reported the identical
-   343.8px height, and the whole grid inflated to match, closing what
-   should have been real margin before the footer to exactly zero.
-   grid-auto-rows:auto (each row sized to its own tallest card only)
-   is the fix - no more forced equalization across unrelated rows. */
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; align-content: start; grid-auto-rows: auto; }
-/* A card that's alone in the last row (an odd count after empty
-   buckets are dropped - see _cover_pages_html) spans both columns
-   instead of leaving a visibly blank cell beside it - part of the
-   same "no empty-looking box" fix as dropping empty cards entirely. */
-/* Spans both columns so it can be centered within the row (grid-column
-   alone would stretch it to fill that whole span, hence justify-self:
-   center + an explicit width matching one normal column - half of the
-   two-column-plus-gap span, minus half that gap - so it reads as "one
-   normal card, centered" rather than "one card stretched to double
-   width" or "one card pinned to the left with empty space beside it". */
-.card.wide { grid-column: 1 / -1; justify-self: center; width: calc(50%% - 1.5mm); }
+/* grid-template-rows: 1fr 1fr (not auto) is what makes both rows in a
+   band's 2x2 layout the same height as each other - matching
+   .band's own equal-share flex-grow above, so a box's size depends on
+   neither its own content nor which band it's in, only on how much
+   total space the page has to give. grid:1 makes the grid itself fill
+   .band-content's full height rather than just its own natural
+   content height, the same reasoning as .band above. Standards has
+   only 3 cards (see STANDARD_CARDS) placed into a grid still sized
+   for 4 - CSS grid's own auto-placement already leaves the 4th cell
+   genuinely blank without any extra markup, at the same size the
+   Update card would have taken up. */
+.grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 3mm; }
 .card { display: flex; flex-direction: column; }
 /* Rounded on all four corners (not just the top) now that the header and
    body are visually one continuous card rather than a flat-topped tab -
@@ -292,7 +297,12 @@ h1 { font-size: 21pt; font-weight: 700; color: %(TEAL)s; margin: 0; line-height:
 .card-h { color: %(WHITE)s; font-size: 10pt; font-weight: 700; padding: 2.4mm 3.6mm 2.4mm 3mm;
           display: flex; align-items: center; justify-content: space-between; gap: 2mm;
           border-radius: 2.6mm 2.6mm 0 0; min-height: 10mm; flex: 0 0 auto; }
-.card-b { background: %(GREY)s; color: %(NAVY)s; padding: 2.5mm 3mm 3mm 3mm; border-radius: 0 0 2.6mm 2.6mm; }
+/* flex:1 so the body fills whatever height the card ends up with (see
+   .card/.grid above) rather than staying at its own natural content
+   height and leaving a gap of bare page background below it - the
+   grey fill needs to reach the card's actual bottom edge now that a
+   card's size isn't just its own content's doing. */
+.card-b { flex: 1; background: %(GREY)s; color: %(NAVY)s; padding: 2.5mm 3mm 3mm 3mm; border-radius: 0 0 2.6mm 2.6mm; }
 .card-b ul { margin: 0; padding-left: 3.4mm; }
 .card-b li { font-size: 8pt; line-height: 1.25; margin-bottom: 1.2mm; }
 .card-b li:last-child { margin-bottom: 0; }
@@ -312,7 +322,11 @@ h1 { font-size: 21pt; font-weight: 700; color: %(TEAL)s; margin: 0; line-height:
 .card-empty { margin: 0; text-align: center; font-style: italic; font-size: 8pt;
               color: rgba(0, 0, 40, 0.45); }
 
-.note { margin-top: auto; border: 0.5pt solid %(WHITE)s; border-radius: 2.2mm; padding: 2.6mm 3mm;
+/* margin-top is a fixed value now, not auto - the two bands claim the
+   page's leftover space themselves (flex:1 each, see .band above), so
+   there's nothing left over for .note to absorb the way it used to
+   when bands sized to their own content instead. */
+.note { margin-top: 6mm; border: 0.5pt solid %(WHITE)s; border-radius: 2.2mm; padding: 2.6mm 3mm;
         font-size: 7.5pt; line-height: 1.35; flex-shrink: 0; }
 .note a { color: %(WHITE)s; }
 
@@ -829,7 +843,7 @@ def _bullet_html(it):
     return f"<li>{esc(it['title_en'])}{suffix}</li>"
 
 
-def _card_html(label, kind, change, icon, items, wide=False):
+def _card_html(label, kind, change, icon, items):
     """Always renders - a fixed set of boxes (4 for Circulars, 3 for
     Standards) shown every time regardless of content, per explicit
     preference over the alternative (dropping empty buckets entirely)
@@ -838,12 +852,11 @@ def _card_html(label, kind, change, icon, items, wide=False):
     an intentional, organized empty state rather than a broken box."""
     bullets = [it for it in items if it["type"] == kind and it["change"] == change]
     color = STATE_COLOR[change]
-    cls = "card wide" if wide else "card"
     if bullets:
         body_cls, body = "card-b", f'<ul>{"".join(_bullet_html(it) for it in bullets)}</ul>'
     else:
         body_cls, body = "card-b empty", '<p class="card-empty">Nothing to report this quarter.</p>'
-    return (f'<div class="{cls}"><div class="card-h" style="background:{color}">'
+    return (f'<div class="card"><div class="card-h" style="background:{color}">'
             f'<span>{esc(label)}</span><span class="cardicon">{_icon_svg(icon)}</span></div>'
             f'<div class="{body_cls}">{body}</div></div>')
 
@@ -936,13 +949,7 @@ def _cover_pages_html(items, quarter, meta):
                 for b in items if b["type"] == kind and b["change"] == change]
 
     def _build_cards(specs, kind):
-        # The last card in an odd-length list (Standards' 3rd, Archivings)
-        # spans the full row width rather than sitting alone next to an
-        # empty grid cell - fixed for this kind, since the bucket count
-        # itself is fixed, not dependent on which buckets are empty.
-        wide_index = len(specs) - 1 if len(specs) % 2 == 1 else -1
-        return [_card_html(label, kind, chg, icon, items, wide=(i == wide_index))
-                for i, (label, chg, icon) in enumerate(specs)]
+        return [_card_html(label, kind, chg, icon, items) for label, chg, icon in specs]
 
     circ_cards = _build_cards(CIRCULAR_CARDS, "Circular")
     std_cards = _build_cards(STANDARD_CARDS, "Standard")

@@ -117,6 +117,165 @@ attached and renders from it. Replies in German, informal register.
 A few non-obvious decisions and bugs found while building this,
 worth knowing before changing the file:
 
+- **The cover page's cards are a fixed 2x2 layout now, not one card
+  per non-empty bucket.** Circulars: New (top-left), Upgrade
+  (top-right), Archivings (bottom-left), Update (bottom-right) - see
+  `CIRCULAR_CARDS`' order. Standards only has 3 buckets (no Update),
+  placed New/Upgrade/Archivings into the same three positions, with
+  the 4th (bottom-right) left genuinely blank - CSS grid's own
+  row-major auto-placement already does this correctly with no extra
+  markup once the grid has an explicit `grid-template-rows: 1fr 1fr`
+  (so the blank cell still takes up its full proportional share of
+  the space, it's just empty). This replaced an earlier version that
+  dropped empty buckets and only rendered however many cards actually
+  had content, each sized to its own content - reverted because a
+  varying box count from quarter to quarter read as inconsistent
+  rather than adaptive.
+- **Every card is meant to be the same size, filling the page, not
+  sized to its own content - both bands share the page's leftover
+  space with equal `flex: 1`.** An earlier version gave bands their
+  *natural* content height instead specifically to stop a sparse band
+  from being stretched to match a fuller one - the right call at the
+  time, when box count varied page to page and stretching made that
+  inconsistency more visible. Wrong call now that the box count is
+  fixed: a uniform, page-filling size is the actual goal here, not
+  something to avoid.
+- **That equal-share rule found a real overflow bug, not just a
+  cosmetic one, and the fix matters beyond this specific layout.**
+  Forcing bands to an equal split needed `min-height: 0` at several
+  points in the flex/grid chain (`.band`, `.band-content`, `.card`) to
+  let a sparser band actually shrink to match - but `min-height: 0` at
+  *any* level also disables the browser's own default protection
+  against squeezing a genuinely tall block of content smaller than it
+  needs. Confirmed as real, not theoretical: with that override in
+  place, a card's grid measured 33px taller than its own containing
+  band - invisibly overflowing past `.page`'s `overflow: hidden`,
+  exactly the kind of silent clipping this project has hit before
+  (see the `TABLE_BODY_BUDGET_MM` note below). Fixed by removing
+  `min-height: 0` everywhere in that chain, restoring the default
+  protection - a band with genuinely more content than an even split
+  allows now grows to fit it rather than clipping, which means boxes
+  are only *exactly* uniform when content comfortably allows it, not
+  unconditionally. That's a deliberate trade: never silently drop
+  real regulation text for the sake of pixel-perfect symmetry.
+  Verified with the same direct text-containment check as the
+  `TABLE_BODY_BUDGET_MM` bug - not just confirming no `.page`-level
+  overflow, but confirming every source string is still actually
+  present in the rendered HTML.
+- **`.band:first-of-type` never matched either band - both silently
+  got the same margin.** `:first-of-type` matches by tag name among
+  siblings, not by class, and a `div.subtitle` sits before both
+  `.band` divs - so neither one is ever literally the first `div`
+  among its siblings, and the rule was dead from the start (confirmed
+  by inspecting computed `margin-top` on both bands: both reported the
+  second value, never the first). Selecting `.band.circulars`
+  directly - the class `_band_html` already assigns each band - is
+  unambiguous instead of relying on sibling position for something
+  that isn't really about sibling position.
+- **Detail pages are one continuous section per family, not split into
+  "new/revised" vs "archived" chapters.** Earlier versions had four
+  sections (New/revised Circulars, New/revised Standards, Archived
+  Circulars, Archived Standards); the per-row state-color stripe
+  already carries the New/Upgrade/Update/Archiving distinction, so a
+  separate chapter for it was redundant - it also meant the subtitle
+  had to describe two things at once ("New or revised Siemens
+  Circulars"). Two sections now (`SECTIONS`), subtitle just "Changes
+  to Circulars in Q4/2026" - the family is the only thing that varies.
+  Entries within a section are sorted New → Upgrade → Update →
+  Archiving (`SECTION_STATE_ORDER`), a stable sort so same-Change rows
+  keep their original relative order.
+- **A table's own left border and a row's state-color stripe used to
+  sit immediately next to each other as two different-colored lines**
+  - the table-wrap's family-color border (teal/blue) and the stripe
+  (green/violet/gold/grey) shared the same edge, reading as a
+  cluttered "mixed" color rather than the one clear signal either was
+  meant to be. Confirmed by zooming into an actual rendered page, not
+  assumed from the CSS. Fixed by removing the wrapper's left border
+  entirely (`border-left: none`) - the stripe is now the only thing on
+  that edge - and widening the stripe itself (3.5pt -> 6pt) since it
+  no longer has to visually compete with anything.
+- **A version like "3" (no decimal point) is shown as "3.0".** Excel
+  stores a whole-number version as a plain number, not text; reading
+  it back as a string drops the trailing zero a human would normally
+  write. `_ensure_decimal()` catches exactly the "plain integer"
+  shape and appends `.0` - anything that already has a decimal point,
+  or isn't numeric to begin with (blank, "TBD"), is left alone.
+- **`TABLE_BODY_BUDGET_MM` has to be re-validated every time something
+  changes the footer's height on every page, not just the cover's.**
+  Adding the color legend shrank the space available on *every* page,
+  but only `COVER_BANDS_BUDGET_MM` was adjusted for it at the time -
+  `TABLE_BODY_BUDGET_MM` was missed, and a real regulation's German
+  summary text was found genuinely clipped mid-sentence by
+  `.page{overflow:hidden}` as a result (confirmed by direct
+  text-containment checking: the full source string literally wasn't
+  present anywhere in the rendered HTML, not just "looked cut off" in
+  a screenshot). Whenever anything is added to or removed from the
+  per-page footer, check *all* the budget constants that assume a
+  certain amount of space is left over, not just the one for whichever
+  page type prompted the change. Verify with the same text-containment
+  check, not a bounding-box overflow check alone - a box can report a
+  clean bottom edge while the text inside it is still truncated by an
+  ancestor's `overflow:hidden` in ways a box-only check won't catch.
+- **The vertical band sidebar (not a horizontal bar) is the right call
+  for separating Circulars from Standards - a full-width horizontal
+  bar was tried and reverted per feedback, too heavy a departure from
+  the original layout.** Made it clearly differentiated a different
+  way instead: a solid color bar (not just colored text) alongside
+  bigger, bolder rotated text, plus more vertical space between the
+  two bands - confirmed sufficient via feedback after the horizontal
+  version was rejected, not assumed to be an improvement on its own.
+- **Two independent color systems, not one.** `CIRC` (teal) / `STD`
+  (blue) mark which *family* a page or table belongs to - Circulars or
+  Standards - applied to the cover page's vertical band label, the
+  underlined word in each detail page's subtitle, and the detail
+  table's header row and outer border. `STATE_COLOR` (New=green,
+  Upgrade=violet, Update=gold, Archiving=grey) marks *what kind of
+  change* a specific regulation is - applied to each cover card's
+  header and, on the detail tables, as a left-edge stripe on every row
+  block (via `td.c-gov`, which already spans the row block's full
+  height through `rowspan`, so one border covers it for free - no
+  dedicated stripe column needed). Keep them conceptually separate
+  when editing either: a table's border color says "this is the
+  Circulars section," a row's stripe says "this specific row is an
+  Upgrade" - conflating the two loses information.
+- **Upgrade is violet, not a third shade of blue, on purpose.** An
+  early version used cyan for Upgrade, which sat close enough to `STD`
+  blue that an Upgrade row in a *Standards* table read as "the same
+  blue twice" rather than two distinct signals. Violet has no other
+  role in the palette, so it can never collide with the family color
+  regardless of which family the row belongs to.
+- **`ARCHIVED` is neutral grey (`#6B7280`), not the blue-grey it
+  started as.** The first version (`#5C7A8A`) was found, via an actual
+  rendered page rather than reading the hex values, to look like "yet
+  another blue" sitting directly next to the `STD` blue border on an
+  archived Standards table - confirmed by sampling actual pixel colors
+  from the rendered image, not just eyeballing it. A properly neutral
+  grey (roughly equal R/G/B) reads as "inactive/archived" against
+  *either* family color, which a blue-tinted grey didn't.
+- **Every `STATE_COLOR` was darkened from a brighter starting point
+  specifically so white card-header text and icons stay legible on
+  it** - computed via actual WCAG contrast ratios, not judged by eye.
+  The bright versions (a vivid mint, a bright cyan, a light gold) each
+  scored under 2.3:1 against white, which is a real legibility
+  problem, not a stylistic quibble; every shipped value clears 4:1.
+  Re-run the same contrast check before changing any of the four -
+  a color can look fine alone and still fail badly with white text on
+  top of it.
+- **Rounded table corners come from a wrapper `<div>`
+  (`border-radius` + `overflow: hidden`), not from the `<table>`
+  element itself.** A `<table>` can't reliably take a `border-radius`
+  directly - `border-collapse` fights it - but a div wrapping the
+  table can, and clips the table's own square corners to match. The
+  wrapper carries the family-color border for the same reason: one
+  place to set it, rather than fighting `border-collapse` per cell.
+- **The cover cards' icons are plain two-tone stroke SVGs (viewBox
+  `0 0 24 24`, `stroke-width 2.1`, round caps/joins) - not the
+  compound "document + small badge in the corner" icon lifted from the
+  source PowerPoint deck that shipped in earlier versions.** The card
+  header text already says "New Siemens Circular" / "Upgrade" / etc.,
+  so a second "this is a document" icon in the corner was redundant
+  rather than polished. One clear icon per state, colored by sitting
+  on its `STATE_COLOR` background rather than needing its own fill.
 - **There is no automated way to populate `Summary` from `Circulars` -
   this was tried twice and both attempts were reverted.** First a
   `sync()` function plus a VBA macro that mirrored it for live editing
