@@ -1,10 +1,8 @@
 # Summary of Regulatory Changes Generator
 
 Generates the quarterly "Summary of regulatory changes" directly from
-the shared `bus_data.xlsx` spreadsheet. There's no preliminary/published
-distinction for this document — it's always the current, complete
-state of the target quarter's `Summary` sheet. All data lives in the
-spreadsheet; this tool only reads and renders it - it never writes to
+the shared `bus_data.xlsx` spreadsheet. All data lives in the
+spreadsheet; this tool only reads and renders it, it never writes to
 the workbook at all. A single self-contained script: HTML-only output,
 no PDF library, no browser dependency at runtime.
 
@@ -17,8 +15,8 @@ inconsistency not worth the complexity. Populating `Summary` from
 `Circulars` is now a manual copy, same as adding an archiving or a new
 Standard already was.
 
-Originally built to run as a custom GPT/agent ("SiemensGPT") with Code
-Interpreter, but `src/generate_summary.py` is a standalone script and
+Originally built to run as a custom SiemensGPT agent with Code
+Interpreter. `src/generate_summary.py` is a standalone script and
 works the same way run locally.
 
 ## Repository structure
