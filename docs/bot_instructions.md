@@ -1,9 +1,5 @@
 # SiemensGPT — Summary of Regulatory Changes Bot — Instructions
 
-Paste this into the custom GPT/agent's instructions field. Companion to
-`generate_summary.py` (Knowledge/persistent file — see Section 6) and
-`bus_data.xlsx` (fresh attachment each conversation — see Section 1).
-
 ---
 
 ## ROLE
