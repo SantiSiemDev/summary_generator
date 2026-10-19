@@ -10,6 +10,12 @@ the hosting sandbox. HTML-only is pure string-building and a file
 write - nothing that can hang. If a PDF is needed, open the HTML in
 any browser and use its own Print to PDF.
 
+There is no preliminary/published distinction for this document - it
+is always the current, complete picture of the target quarter as the
+Summary sheet stands right now. Don't add a draft/final split back in;
+it doesn't correspond to anything in the real publishing process this
+generates for.
+
 USAGE (from Code Interpreter):
     python generate_summary.py /path/to/bus_data.xlsx
 
@@ -663,7 +669,7 @@ def _detect_quarter(circulars_rows):
     return f"Q{n}/{y}"
 
 
-def load_from_xlsx(xlsx_path: str, quarter: str = None) -> dict:
+def load_from_xlsx(xlsx_path: str, quarter: str | None = None) -> dict:
     """
     Reads bus_data.xlsx and returns the dict build() expects:
     {"meta": {...}, "items": [...]}. Prefers the "Summary" sheet
@@ -739,15 +745,34 @@ def load_from_xlsx(xlsx_path: str, quarter: str = None) -> dict:
     if sheet_name:
         ws = wb[sheet_name]
         headers = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
-        idx = {h: i for i, h in enumerate(headers) if h}
+        # Case-insensitive, whitespace-trimmed matching - consistent with
+        # every other header lookup in this file. This one used to be a
+        # raw exact-string match, which is exactly the kind of thing a
+        # header like "Number " (trailing space) or "number" (different
+        # case) silently defeats: col() would return None, cell(row, None)
+        # returns "" for every row, and the whole document renders with
+        # blank Circular/Standard numbers throughout - every OTHER field
+        # still works, since their own header happened to still match,
+        # which is what makes this failure mode so easy to miss until
+        # someone actually reads the rendered output.
+        idx = {str(h).strip().lower(): i for i, h in enumerate(headers) if h}
 
         def col(*names):
             for n in names:
-                if n in idx:
-                    return idx[n]
+                if n.lower() in idx:
+                    return idx[n.lower()]
             return None
 
-        c_num, c_type, c_chg = col("Number", "Circular Number"), col("Type"), col("Change")
+        c_num, c_type, c_chg = col("Number", "Circular Number", "Standard Number", "Document Number"), col("Type"), col("Change")
+        if c_num is None:
+            raise ValueError(
+                f"'{sheet_name}' has no column recognizable as the regulation number - "
+                f"looked for 'Number', 'Circular Number', 'Standard Number', or 'Document "
+                f"Number' (case and stray whitespace don't matter, this matching already "
+                f"ignores both) - every regulation number in the rendered document would "
+                f"come out blank, which is worse than failing loudly here. Found these "
+                f"headers instead: {', '.join(str(h) for h in headers if h)}. Rename the "
+                f"column to one of the four accepted names and try again.")
         c_gov = col("Governance responsibility", "Governance Responsibility")
         # Version: prefer the current two-column split (Current Version /
         # Planned Version), matching Circulars' own shape - combined into
@@ -1020,7 +1045,12 @@ def build(data: dict, out_dir: str = "."):
     quarter = meta.get("Quarter", "")
     if not quarter:
         raise ValueError("No quarter could be determined - set Meta!Quarter, pass quarter= "
-                         "explicitly, or check 'Planned Quarter' values in Circulars.")
+                         "explicitly (e.g. quarter=\"Q4/2026\" - quarter number first, then a "
+                         "4-digit year, separated by / or - or a space; \"2026 Q4\" or \"Q4 FY26\" "
+                         "will NOT parse), or check that 'Planned Quarter' in Circulars/Roadmap "
+                         "actually has values in that same Q#/YYYY shape - a blank column, or one "
+                         "converted to an Excel date by accident, both look like no quarter at "
+                         "all to this check.")
     if not items:
         raise ValueError(f"No regulations found for {quarter}.")
 
@@ -1055,18 +1085,48 @@ def build(data: dict, out_dir: str = "."):
     return html_path, None
 
 
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage:")
-        print("  python generate_summary.py bus_data.xlsx [out_dir] [quarter]")
-        sys.exit(1)
-    data_path = sys.argv[1]
-    if not data_path.lower().endswith(".xlsx"):
-        print("Input must be an .xlsx spreadsheet.")
-        sys.exit(1)
-
+def _run_cli():
+    """Only ever called from the __main__ guard below, and only when
+    sys.argv[1] already looks like a genuine .xlsx path - never calls
+    sys.exit(). That matters more than it looks: __name__ == "__main__"
+    is true not just for a real `python generate_summary.py ...`
+    invocation, but also whenever this file is exec()'d into a hosted
+    Code Interpreter session - exactly how the chat-bot deployment is
+    documented (bot_instructions.md) to load it, specifically to avoid
+    Python's import bytecode cache going stale across turns. Confirmed
+    concretely, not just in theory: running
+    `exec(open("generate_summary.py").read())` in a plain interactive
+    session reliably hit this block with whatever sys.argv the host
+    process happened to have (not file paths at all) and sys.exit(1)
+    tore down the entire session before load_from_xlsx/build were ever
+    reached - the exact failure a person hit for real, not a
+    hypothetical. There is no reliable way to distinguish "real
+    terminal invocation" from "exec'd into a notebook-like host" by
+    inspecting __name__ or sys.argv alone, so the fix isn't a cleverer
+    check - it's making every path through this block harmless to a
+    hosted session: if argv doesn't already look like a real
+    invocation, do nothing and let exec() continue normally, rather
+    than ever exiting the whole process."""
     out_dir_arg = sys.argv[2] if len(sys.argv) > 2 else "."
     quarter_arg = sys.argv[3] if len(sys.argv) > 3 else None
-    summary_data = load_from_xlsx(data_path, quarter=quarter_arg)
+    summary_data = load_from_xlsx(sys.argv[1], quarter=quarter_arg)
     html_out, pdf_out = build(summary_data, out_dir=out_dir_arg)
     print("HTML written to:", html_out)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1].lower().endswith(".xlsx"):
+        _run_cli()
+    elif len(sys.argv) == 1:
+        # A genuine `python generate_summary.py` with nothing else on
+        # the line - most likely a real terminal user who forgot the
+        # path, so worth a hint. stderr, not stdout, and no sys.exit():
+        # harmless even if this fires from an exec()'d hosted session
+        # instead (sys.argv there is whatever the host happened to
+        # have, not usually empty like this, but better safe).
+        print("Usage: python generate_summary.py bus_data.xlsx [out_dir] [quarter]",
+              file=sys.stderr)
+    # Any other shape of sys.argv (2+ entries, first one not .xlsx) is
+    # left completely alone - almost certainly a hosted session's own
+    # argv, not a person's typo, and printing anything here risks
+    # looking like a real error to whatever's watching stdout.
