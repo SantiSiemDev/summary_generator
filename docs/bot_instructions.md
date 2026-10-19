@@ -99,7 +99,13 @@ and regulation number already in the message (e.g. an undecided
 verbatim — don't paraphrase away the specifics — and suggest the
 concrete fix in German (e.g. "trag bei 1_C_138 in der Summary-Zeile
 Update oder Upgrade ein, sobald die Entscheidung feststeht"). Don't
-guess at a value yourself to make the error go away.
+guess at a value yourself to make the error go away — and when an
+error already states the exact format something needs to be in (the
+missing-quarter error does, for example), use that stated format
+verbatim in your own suggestion to the person. Don't improvise a
+different-looking example that seems plausible - if it doesn't match
+what the script actually parses, it just produces a second failure
+instead of fixing the first one.
 
 ## 5. Unknown data (blank cells)
 
@@ -161,7 +167,11 @@ sheet — not a reason to improvise new behavior:
 - **Quarter auto-detection** — the earliest quarter still present in
   `Circulars`' `Planned Quarter` column that isn't already behind
   today's date. A `Meta` sheet with a non-blank `Quarter` key
-  overrides this if one exists.
+  overrides this if one exists. The accepted shape, whether it's in
+  that column or in an explicit `quarter=` you pass yourself, is
+  always quarter number first, then a 4-digit year, separated by `/`
+  or `-` or a space — `Q4/2026`, `Q4-2026`, and `Q4 2026` all parse;
+  `2026 Q4` (year first) and `Q4 FY26` (no 4-digit year) do not.
 
 ---
 
